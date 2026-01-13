@@ -1,0 +1,255 @@
+<?php
+namespace App\Models;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+
+class User extends Authenticatable {
+    use Notifiable;
+    protected $fillable = ['name','email','password','role'];
+    protected $hidden = ['password','remember_token'];
+}
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Project extends Model {
+    protected $fillable = [
+        'title','abstract','student_name','supervisor_name',
+        'course_id','year','file_path','uploaded_by','status'
+    ];
+    public function course() { return $this->belongsTo(Course::class); }
+    public function uploader() { return $this->belongsTo(User::class,'uploaded_by'); }
+}
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class School extends Model {
+    protected $fillable = ['school_name'];
+    public function departments(){ return $this->hasMany(Department::class); }
+}
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Department extends Model {
+    protected $fillable = ['school_id','department_name'];
+    public function courses(){ return $this->hasMany(Course::class); }
+}
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Course extends Model {
+    protected $fillable = ['department_id','course_name'];
+    public function projects(){ return $this->hasMany(Project::class); }
+}
+<?php
+namespace App\Http\Controllers;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+
+class AuthController extends Controller {
+    public function showLogin(){ return view('auth.login'); }
+
+    public function login(Request $req){
+        $credentials = $req->only('email','password');
+        if(Auth::attempt($credentials)){
+            return redirect()->route('dashboard');
+        }
+        return back()->withErrors(['email'=>'Invalid credentials']);
+    }
+
+    public function logout(){ Auth::logout(); return redirect('/login'); }
+}
+<?php
+namespace App\Http\Controllers;
+use Illuminate\Http\Request;
+use App\Models\Project;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+
+class ProjectController extends Controller {
+
+    public function dashboard(){ return view('dashboard'); }
+
+    public function showUpload(){ return view('upload'); }
+
+    public function upload(Request $req){
+        $req->validate([
+            'title'=>'required',
+            'course_id'=>'required|integer',
+            'year'=>'required|integer',
+            'file'=>'required|file|max:51200'
+        ]);
+        $path = $req->file('file')->store('projects');
+        Project::create([
+            'title'=>$req->title,
+            'abstract'=>$req->abstract,
+            'student_name'=>$req->student_name,
+            'supervisor_name'=>$req->supervisor_name,
+            'course_id'=>$req->course_id,
+            'year'=>$req->year,
+            'file_path'=>$path,
+            'uploaded_by'=>Auth::id()
+        ]);
+        return redirect()->back()->with('success','Project uploaded!');
+    }
+
+    public function browse(Request $req){
+        $query = Project::with('course');
+        if($req->q) $query->where('title','like','%'.$req->q.'%');
+        return view('browse',['projects'=>$query->latest()->get()]);
+    }
+}
+<?php
+namespace App\Http\Middleware;
+use Closure;
+use Illuminate\Support\Facades\Auth;
+
+class RoleMiddleware {
+    public function handle($request, Closure $next, ...$roles){
+        if(!Auth::check()) return redirect('/login');
+        if(!in_array(Auth::user()->role, $roles)) abort(403, 'Unauthorized');
+        return $next($request);
+    }
+}
+<?php
+namespace App\Http\Middleware;
+use Closure;
+use Illuminate\Support\Facades\Auth;
+
+class RoleMiddleware {
+    public function handle($request, Closure $next, ...$roles){
+        if(!Auth::check()) return redirect('/login');
+        if(!in_array(Auth::user()->role, $roles)) abort(403, 'Unauthorized');
+        return $next($request);
+    }
+}
+<?php
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateUsersTable extends Migration {
+    public function up(){
+        Schema::create('users', function(Blueprint $table){
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('password');
+            $table->enum('role',['admin','lecturer','student']);
+            $table->timestamps();
+        });
+    }
+    public function down(){ Schema::dropIfExists('users'); }
+}
+<?php
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateUsersTable extends Migration {
+    public function up(){
+        Schema::create('users', function(Blueprint $table){
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('password');
+            $table->enum('role',['admin','lecturer','student']);
+            $table->timestamps();
+        });
+    }
+    public function down(){ Schema::dropIfExists('users'); }
+}
+Schema::create('schools', function(Blueprint $table){
+    $table->id();
+    $table->string('school_name');
+    $table->timestamps();
+});
+Schema::create('departments', function(Blueprint $table){
+    $table->id();
+    $table->foreignId('school_id')->constrained()->onDelete('cascade');
+    $table->string('department_name');
+    $table->timestamps();
+});
+Schema::create('courses', function(Blueprint $table){
+    $table->id();
+    $table->foreignId('department_id')->constrained()->onDelete('cascade');
+    $table->string('course_name');
+    $table->timestamps();
+});
+Schema::create('projects', function(Blueprint $table){
+    $table->id();
+    $table->string('title');
+    $table->text('abstract')->nullable();
+    $table->string('student_name');
+    $table->string('supervisor_name')->nullable();
+    $table->foreignId('course_id')->constrained()->onDelete('cascade');
+    $table->integer('year');
+    $table->string('file_path');
+    $table->foreignId('uploaded_by')->constrained('users')->onDelete('set null');
+    $table->enum('status',['pending','approved','rejected'])->default('pending');
+    $table->timestamps();
+});
+<?php
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProjectController;
+
+Route::get('/login',[AuthController::class,'showLogin'])->name('login');
+Route::post('/login',[AuthController::class,'login']);
+Route::get('/logout',[AuthController::class,'logout']);
+
+Route::middleware(['auth'])->group(function(){
+    Route::get('/dashboard',[ProjectController::class,'dashboard'])->name('dashboard');
+    Route::get('/upload',[ProjectController::class,'showUpload'])->middleware('role:student,lecturer,admin');
+    Route::post('/upload',[ProjectController::class,'upload'])->middleware('role:student,lecturer,admin');
+});
+Route::get('/', [ProjectController::class,'browse']);
+<form method="post" action="/login">@csrf
+<input type="email" name="email" placeholder="Email" required>
+<input type="password" name="password" placeholder="Password" required>
+<button type="submit">Login</button>
+</form>
+<form action="/upload" method="post" enctype="multipart/form-data">@csrf
+<input type="text" name="title" placeholder="Title" required>
+<textarea name="abstract" placeholder="Abstract"></textarea>
+<input type="text" name="student_name" placeholder="Student Name">
+<input type="text" name="supervisor_name" placeholder="Supervisor Name">
+<input type="number" name="course_id" placeholder="Course ID" required>
+<input type="number" name="year" placeholder="Year" required>
+<input type="file" name="file" required>
+<button type="submit">Upload</button>
+</form>
+<form method="get" action="/">
+<input type="text" name="q" placeholder="Search projects">
+<button type="submit">Search</button>
+</form>
+@foreach($projects as $p)
+<div>
+<h3>{{ $p->title }} ({{ $p->year }})</h3>
+<p>{{ $p->abstract }}</p>
+<a href="{{ Storage::url($p->file_path) }}" target="_blank">Download</a>
+</div>
+@endforeach
+'disks' => [
+    'projects' => [
+        'driver' => 'local',
+        'root' => storage_path('app/projects'),
+        'url' => env('APP_URL').'/storage/projects',
+        'visibility' => 'public',
+    ],
+],
+APP_NAME="University Projects"
+APP_URL=http://localhost
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=uni_projects
+DB_USERNAME=root
+DB_PASSWORD=
+
+}
